@@ -1,0 +1,16 @@
+# Credenciais
+.env
+
+# Ambiente virtual
+venv/
+env/
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Arquivos do VS Code
+.vscode/
+
+# Logs
+*.log
