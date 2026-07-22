@@ -9,7 +9,9 @@
 from scraper.ingresso import listar_filmes_em_cartaz
 from scraper.ingresso import listar_sessoes_do_filme
 
-from database.supabase_client import salvar_dados_ingresso
+from scraper.youtube import buscar_trailer_youtube
+
+from database.supabase_client import salvar_dados_ingresso, salvar_dados_youtube
 
 
 cidade = "uberlandia"
@@ -31,6 +33,7 @@ for filme in filmes:
 
     titulo = detalhes["filme"].get("titulo") or filme["titulo"]
 
+    # INGRESSO.COM -------------------------------
     salvar_dados_ingresso(
         filme_dados={
             "titulo": titulo,
@@ -41,7 +44,7 @@ for filme in filmes:
             "diretor": detalhes["filme"].get("diretor"),
             "generos": detalhes["filme"].get("generos", []),
             "elenco": detalhes["filme"].get("elenco", []),
-            "trailer_url": detalhes["filme"].get("trailer_url"),
+            # "trailer_url": detalhes["filme"].get("trailer_url"),
         },
         sinopse=detalhes["filme"].get("sinopse"),
         sessoes_lista=[
@@ -56,7 +59,13 @@ for filme in filmes:
         cidade_slug=cidade
     )
 
+    # YOUTUBE -------------------------------
+    youtube = buscar_trailer_youtube(titulo)
+
+    if youtube:
+        salvar_dados_youtube(titulo, youtube["trailer_url"], youtube["imagem_url_youtube"])
+
+
     print("OK\n")
 
-
-print("Scraping finalizado!")
+print("Scrapings finalizados!")

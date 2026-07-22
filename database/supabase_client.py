@@ -27,7 +27,7 @@ def salvar_dados_ingresso(filme_dados, sinopse, sessoes_lista, cidade_slug):
                 "diretor": filme_dados.get("diretor"),
                 "generos": filme_dados.get("generos", []),
                 "elenco": filme_dados.get("elenco", []),
-                "trailer_url_youtube": filme_dados.get("trailer_url"),
+                # "trailer_url_youtube": filme_dados.get("trailer_url"),
             },
             on_conflict="titulo"
         ).execute() 
@@ -70,29 +70,17 @@ def salvar_dados_ingresso(filme_dados, sinopse, sessoes_lista, cidade_slug):
         print(f"Erro ao salvar no banco: {e}")
 
 
-# TESTE
-# print("Testando conexão e salvamento no Supabase...")
+def salvar_dados_youtube(titulo: str, trailer_url: str, imagem_url_youtube: str):
+    """
+    Atualiza os dados do YouTube de um filme já salvo no banco.
+    """
+    try:
+        supabase.table("filmes").update({
+            "trailer_url_youtube": trailer_url,
+            "imagem_url_youtube": imagem_url_youtube,
+        }).eq("titulo", titulo).execute()
 
-# filme_teste = {
-#     "titulo": "Filme Teste MVP",
-#     "url": "https://www.ingresso.com/filme/filme-teste"
-# }
+        print(f"YouTube atualizado para '{titulo}'.")
 
-# sinopse_teste = (
-#     "Esta é uma sinopse de teste para verificar se o banco está salvando."
-# )
-
-# sessoes_teste = [
-#     {
-#         "cinema": "Cinema Exemplo Uberlândia 2",
-#         "horario": "2026-07-22T15:00:00-03:00",
-#         "link_compra": "https://checkout.ingresso.com/?sessionId=12345"
-#     }
-# ]
-
-# salvar_dados_ingresso(
-#     filme_teste,
-#     sinopse_teste,
-#     sessoes_teste,
-#     "uberlandia"
-# )
+    except Exception as e:
+        print(f"Erro ao atualizar YouTube para '{titulo}': {e}")
