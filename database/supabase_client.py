@@ -11,28 +11,33 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 def salvar_dados_ingresso(filme_dados, sinopse, sessoes_lista, cidade_slug):
-    """
-    Salva ou atualiza os dados do filme, cinema e sessões no banco.
-    """
     try:
-        # 1. Salva ou atualiza o Filme
-        response_filme = supabase.table("filmes").upsert(
-            {
-                "titulo": filme_dados["titulo"],
-                "sinopse": sinopse,
-                "url_ingresso": filme_dados.get("url", ""),
-                "imagem_url": filme_dados.get("imagem_url"),
-                "duracao": filme_dados.get("duracao"),
-                "classificacao": filme_dados.get("classificacao"),
-                "diretor": filme_dados.get("diretor"),
-                "generos": filme_dados.get("generos", []),
-                "elenco": filme_dados.get("elenco", []),
-                # "trailer_url_youtube": filme_dados.get("trailer_url"),
-            },
-            on_conflict="titulo"
-        ).execute() 
+        dados_filme = {
+            "titulo": filme_dados["titulo"],
+            "sinopse": sinopse,
+            "url_ingresso": filme_dados.get("url", ""),
+            "imagem_url": filme_dados.get("imagem_url"),
+            "duracao": filme_dados.get("duracao"),
+            "classificacao": filme_dados.get("classificacao"),
+            "diretor": filme_dados.get("diretor"),
+            "generos": filme_dados.get("generos", []),
+            "elenco": filme_dados.get("elenco", []),
+        }
 
-        # Pega o ID do filme salvo
+        imdb_id = filme_dados.get("imdb_id")
+        if imdb_id:
+            dados_filme["imdb_id"] = imdb_id
+            dados_filme["nota_imdb"] = filme_dados.get("nota_imdb")
+
+        # imdb_id e o identificador real do filme; so cai pro titulo
+        # quando o scraper do IMDb nao encontrou nada (raro).
+        chave_conflito = "imdb_id" if imdb_id else "titulo"
+
+        response_filme = supabase.table("filmes").upsert(
+            dados_filme,
+            on_conflict=chave_conflito
+        ).execute()
+
         filme_id = response_filme.data[0]["id"]
 
         # 2. Salva Cinemas e Sessões
