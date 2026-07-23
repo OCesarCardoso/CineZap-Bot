@@ -49,7 +49,10 @@ for filme in filmes:
             {
                 "cinema": s["cinema_nome"],
                 "horario": s["horario"],
-                "link_compra": s["checkout_url"]
+                "link_compra": s["checkout_url"],
+                "tipo_sessao": s.get("tipo_sessao"),
+                "preco_sem_taxa": s.get("preco_sem_taxa"),
+                "preco_com_taxa": s.get("preco_com_taxa"),
             }
             for s in detalhes["sessoes"]
             if s["cinema_nome"] and s["horario"]

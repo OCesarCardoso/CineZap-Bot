@@ -101,7 +101,10 @@ def salvar_dados_ingresso(filme_dados, sinopse, sessoes_lista, cidade_slug):
                     "filme_id": filme_id,
                     "cinema_id": cinema_id,
                     "data_horario": sessao["horario"],
-                    "link_compra": sessao["link_compra"]
+                    "link_compra": sessao["link_compra"],
+                    "tipo_sessao": sessao.get("tipo_sessao"),
+                    "preco_sem_taxa": sessao.get("preco_sem_taxa"),
+                    "preco_com_taxa": sessao.get("preco_com_taxa"),
                 },
                 on_conflict="filme_id,cinema_id,data_horario"
             ).execute()

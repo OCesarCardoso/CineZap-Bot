@@ -1,24 +1,19 @@
 """
 Scraper do ingresso.com
 
-Extraímos os blocos <script type="application/ld+json"> que o
-site ja usa para SEO. Sao dados estruturados, estaveis e confiaveis.
-
-Duas funcoes principais:
-    listar_filmes_em_cartaz(cidade) -> lista de filmes em cartaz na cidade
-    listar_sessoes_do_filme(cidade, filme_url_key) -> cinemas/horarios do filme
+Playwright: lista filmes em cartaz + dados do filme (JSON-LD)
+API interna: sessoes com tipo (Dublado, XD, etc.) e precos
 """
 
 import json
 import re
+import requests
 from playwright.sync_api import sync_playwright
 
 
+# ── Helpers internos ──────────────────────────────────────────────────────────
+
 def _extrair_blocos_json_ld(html: str) -> list[dict]:
-    """
-    Encontra todos os blocos [script type='application/ld+json'] e retorna
-    como lista de dicionarios ja parseados.
-    """
     padrao = re.compile(
         r'<script type="application/ld\+json"[^>]*>(.*?)</script>',
         re.DOTALL,
@@ -33,9 +28,9 @@ def _extrair_blocos_json_ld(html: str) -> list[dict]:
     return blocos
 
 
-def _carregar_pagina(url: str, headless: bool = True) -> str:
+def _carregar_pagina(url: str) -> str:
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(6000)
@@ -44,18 +39,137 @@ def _carregar_pagina(url: str, headless: bool = True) -> str:
         return html
 
 
+def _buscar_id_cidade(cidade_slug: str) -> str | None:
+    """
+    Busca o ID numerico da cidade na API do ingresso.com.
+    ex: "uberlandia" -> "23"
+    """
+    url = f"https://api-content.ingresso.com/v0/states/city/name/{cidade_slug}"
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        data = r.json()
+        return str(data.get("id"))
+    except Exception:
+        return None
+
+
+def _buscar_id_evento(filme_url_key: str) -> str | None:
+    """
+    Busca o ID numerico do filme/evento na API do ingresso.com.
+    ex: "a-odisseia" -> "30413"
+    """
+    url = f"https://api-content.ingresso.com/v0/events/url-key/{filme_url_key}/partnership/home"
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        data = r.json()
+        return str(data.get("id"))
+    except Exception:
+        return None
+
+
+def _buscar_datas_disponiveis(cidade_id: str, evento_id: str) -> list[str]:
+    """
+    Retorna as datas disponíveis para um filme numa cidade.
+    """
+    url = f"https://api-content.ingresso.com/v0/sessions/city/{cidade_id}/event/{evento_id}/dates/partnership/home"
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        datas = r.json()
+        return [d.get("date") for d in datas if d.get("date")]
+    except Exception:
+        return []
+
+
+def _formatar_tipo_sessao(tipos: list[str]) -> str:
+    """
+    Remove "Normal" e junta os tipos restantes.
+    ["Normal", "Dublado"] -> "Dublado"
+    ["XD", "Legendado"]   -> "XD Legendado"
+    ["Normal", "Vip", "Legendado"] -> "Vip Legendado"
+    """
+    tipos_filtrados = [t for t in tipos if t.lower() != "normal"]
+    return " ".join(tipos_filtrados) if tipos_filtrados else "Normal"
+
+
+def _buscar_preco_sessao(session_id: str, section_id: str) -> dict:
+    """
+    Busca preço inteira sem e com taxa de serviço para uma sessão.
+    Retorna {"preco_sem_taxa": 46.0, "preco_com_taxa": 52.44}
+    """
+    url = f"https://api.ingresso.com/v1/sessions/{session_id}/sections/{section_id}/tickets"
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        tickets = r.json().get("default", [])
+        for ticket in tickets:
+            if ticket.get("name", "").lower() == "inteira":
+                return {
+                    "preco_sem_taxa": ticket.get("price"),
+                    "preco_com_taxa": ticket.get("total"),
+                }
+    except Exception:
+        pass
+    return {"preco_sem_taxa": None, "preco_com_taxa": None}
+
+
+def _buscar_sessoes_por_data(cidade_id: str, evento_id: str, data: str) -> list[dict]:
+    """
+    Busca todas as sessoes de um filme numa cidade em uma data especifica.
+    Retorna lista de sessoes com cinema, horario, tipo e preco.
+    """
+    url = (
+        f"https://api-content.ingresso.com/v0/sessions"
+        f"/city/{cidade_id}/event/{evento_id}/partnership/home/groupBy/sessionType"
+    )
+    try:
+        r = requests.get(
+            url,
+            params={"date": data},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10
+        )
+        dados = r.json()
+    except Exception:
+        return []
+
+    sessoes = []
+
+    for dia in dados:
+        for teatro in dia.get("theaters", []):
+            cinema_nome = teatro.get("name")
+            cinema_endereco = teatro.get("address")
+
+            for grupo in teatro.get("sessionTypes", []):
+                tipo = _formatar_tipo_sessao(grupo.get("type", []))
+
+                for s in grupo.get("sessions", []):
+                    horario = s.get("date", {}).get("localDate")
+                    checkout_url = s.get("siteURL") or s.get("checkoutUrl")
+                    session_id = s.get("id")
+                    section_id = s.get("sectionId") or s.get("room", "")
+
+                    # Busca preço só se tiver o ID necessário
+                    preco = {"preco_sem_taxa": s.get("price"), "preco_com_taxa": None}
+                    if session_id and section_id and str(section_id).isdigit():
+                        preco = _buscar_preco_sessao(session_id, section_id)
+
+                    sessoes.append({
+                        "cinema_nome": cinema_nome,
+                        "cinema_endereco": cinema_endereco,
+                        "horario": horario,
+                        "tipo_sessao": tipo,
+                        "preco_sem_taxa": preco["preco_sem_taxa"],
+                        "preco_com_taxa": preco["preco_com_taxa"],
+                        "checkout_url": checkout_url,
+                    })
+
+    return sessoes
+
+
+# ── Funções públicas ──────────────────────────────────────────────────────────
+
 def listar_filmes_em_cartaz(cidade: str) -> list[dict]:
     """
-    Retorna a lista de filmes REALMENTE em cartaz numa cidade.
-
-    Extraimos diretamente dos cartoes de filme visiveis na pagina
-    (elementos com data-testid="event-item"), que sao os que o site
-    realmente exibe como "em cartaz" para a cidade selecionada.
-
-    cidade: slug da cidade no formato do ingresso.com (ex: "uberlandia")
-
-    Retorno: lista de dicts, cada um com:
-        titulo, url_key (usado para montar a URL da pagina do filme)
+    Retorna a lista de filmes em cartaz numa cidade via Playwright.
     """
     url = f"https://www.ingresso.com/filmes/em-cartaz?city={cidade}"
 
@@ -65,11 +179,10 @@ def listar_filmes_em_cartaz(cidade: str) -> list[dict]:
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(6000)
 
-        # Pega todos os cartoes de filme realmente exibidos na pagina
         cartoes = page.query_selector_all('[data-testid="event-item"]')
 
         filmes = []
-        vistos = set()  # evita duplicados (o mesmo filme pode aparecer 2x na pagina)
+        vistos = set()
 
         for cartao in cartoes:
             link_elemento = cartao.query_selector("a")
@@ -80,7 +193,6 @@ def listar_filmes_em_cartaz(cidade: str) -> list[dict]:
             titulo_elemento = cartao.query_selector("h4")
             titulo = titulo_elemento.inner_text().strip() if titulo_elemento else ""
 
-            # extrai o url_key do link, ex: "/filme/moana?city=uberlandia" -> "moana"
             if "/filme/" in href:
                 url_key = href.split("/filme/")[1].split("?")[0]
             else:
@@ -98,17 +210,10 @@ def listar_filmes_em_cartaz(cidade: str) -> list[dict]:
 
 def listar_sessoes_do_filme(cidade: str, filme_url_key: str) -> dict:
     """
-    Retorna detalhes do filme + todas as sessoes (cinema, horario, link de compra)
-    numa cidade.
-
-    cidade: slug da cidade (ex: "uberlandia")
-    filme_url_key: slug do filme na URL (ex: "moana")
-
-    Retorno: dict com:
-        filme: {titulo, sinopse, duracao_minutos, classificacao, generos,
-                diretor, elenco, trailer_url}
-        sessoes: lista de {cinema_nome, cinema_endereco, horario, checkout_url}
+    Retorna dados do filme (via Playwright/JSON-LD) e todas as sessoes
+    de todos os dias disponiveis (via API interna do ingresso.com).
     """
+    # Dados do filme via Playwright
     url = f"https://www.ingresso.com/filme/{filme_url_key}?city={cidade}"
     html = _carregar_pagina(url)
     blocos = _extrair_blocos_json_ld(html)
@@ -118,13 +223,11 @@ def listar_sessoes_do_filme(cidade: str, filme_url_key: str) -> dict:
     for bloco in blocos:
         grafo = bloco.get("@graph", [])
         for item in grafo:
-            tipo = item.get("@type")
-
-            if tipo == "Movie":
+            if item.get("@type") == "Movie":
                 resultado["filme"] = {
                     "titulo": item.get("name"),
                     "sinopse": item.get("description"),
-                    "duracao": item.get("duration"),  # formato ISO 8601 (ex: PT115M)
+                    "duracao": item.get("duration"),
                     "classificacao": item.get("contentRating"),
                     "generos": item.get("genre", []),
                     "diretor": (item.get("director") or {}).get("name"),
@@ -133,32 +236,14 @@ def listar_sessoes_do_filme(cidade: str, filme_url_key: str) -> dict:
                     "imagem_url": item.get("image"),
                 }
 
-            elif tipo == "ScreeningEvent":
-                cinema = item.get("location", {})
-                endereco = cinema.get("address", {})
-                oferta = item.get("offers", {})
+    # Sessoes via API interna
+    cidade_id = _buscar_id_cidade(cidade)
+    evento_id = _buscar_id_evento(filme_url_key)
 
-                resultado["sessoes"].append({
-                    "cinema_nome": cinema.get("name"),
-                    "cinema_endereco": endereco.get("streetAddress"),
-                    "horario": item.get("startDate"),  # formato ISO: 2026-07-22T12:10:00-03:00
-                    "checkout_url": oferta.get("url"),
-                    "disponivel": oferta.get("availability") == "https://schema.org/InStock",
-                })
+    if cidade_id and evento_id:
+        datas = _buscar_datas_disponiveis(cidade_id, evento_id)
+        for data in datas:
+            sessoes_do_dia = _buscar_sessoes_por_data(cidade_id, evento_id, data)
+            resultado["sessoes"].extend(sessoes_do_dia)
 
     return resultado
-
-
-# print("=== Filmes em cartaz em Uberlandia (fonte corrigida) ===")
-# filmes = listar_filmes_em_cartaz("uberlandia")
-# print(f"Total encontrado: {len(filmes)}\n")
-# for f in filmes:
-#     print(f"- {f['titulo']} (url_key: {f['url_key']})")
-
-# print("\n=== Sessoes de Moana em Uberlandia ===")
-# detalhes = listar_sessoes_do_filme("uberlandia", "moana")
-# print(f"Filme: {detalhes['filme'].get('titulo')}")
-# print(f"Sinopse: {detalhes['filme'].get('sinopse', '')[:100]}...")
-# print(f"\nTotal de sessoes encontradas: {len(detalhes['sessoes'])}")
-# for s in detalhes["sessoes"][:5]:
-#     print(f"- {s['cinema_nome']} | {s['horario']}")

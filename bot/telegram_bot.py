@@ -76,7 +76,6 @@ async def escolher_filme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filme_id = int(query.data.split(":")[1])
     context.user_data["filme_id"] = filme_id
 
-
     filme = (
         supabase.table("filmes")
         .select("titulo, sinopse, duracao, classificacao, generos")
@@ -91,11 +90,11 @@ async def escolher_filme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if f.get("sinopse"):
         texto += f"📝 {f['sinopse']}\n\n"
     if f.get("duracao"):
-        texto += f"⏱ Duração: {f['duracao']}\n"
+        texto += f"⏱ *Duração:* {f['duracao']}\n"
     if f.get("classificacao"):
-        texto += f"🔞 Classificação: {f['classificacao']}\n"
+        texto += f"🔞 *Classificação:* {f['classificacao']}\n"
     if f.get("generos"):
-        texto += f"🎭 Gêneros: {', '.join(f['generos'])}\n"
+        texto += f"🎭 *Gêneros:* {', '.join(f['generos'])}\n"
 
     teclado = [
         [InlineKeyboardButton("🎬 Sessões", callback_data=f"sessoes:{filme_id}")],
@@ -111,16 +110,120 @@ async def escolher_filme(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ── Sessões ───────────────────────────────────────────────────────────────────
+# ── Sessões → escolha de data ─────────────────────────────────────────────────
 
 async def ver_sessoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     filme_id = int(query.data.split(":")[1])
+    context.user_data["filme_id"] = filme_id
     cidade_slug = context.user_data.get("cidade", "uberlandia")
 
-    filme = supabase.table("filmes").select("titulo").eq("id", filme_id).single().execute()
+    cinemas = supabase.table("cinemas").select("id").eq("cidade", cidade_slug).execute()
+    cinema_ids = [c["id"] for c in cinemas.data]
+
+    agora_utc = datetime.now(timezone.utc)
+    limite_utc = agora_utc - timedelta(minutes=15)
+    limite_str = limite_utc.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+    sessoes = (
+        supabase.table("sessoes")
+        .select("data_horario")
+        .eq("filme_id", filme_id)
+        .in_("cinema_id", [c["id"] for c in cinemas.data])
+        .gte("data_horario", limite_str)
+        .execute()
+    )
+
+    if not sessoes.data:
+        await query.edit_message_text(
+            "Não há sessões disponíveis para este filme no momento.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")]]),
+        )
+        return
+
+    # Datas únicas disponíveis em Brasília
+    datas_vistas = set()
+    datas_ordenadas = []
+    for s in sessoes.data:
+        dt_utc = datetime.fromisoformat(s["data_horario"])
+        dt_brt = dt_utc.astimezone(timezone(timedelta(hours=-3)))
+        data_str = dt_brt.strftime("%Y-%m-%d")
+        if data_str not in datas_vistas:
+            datas_vistas.add(data_str)
+            datas_ordenadas.append((data_str, dt_brt.strftime("%a, %d/%m").capitalize()))
+
+    teclado = [
+        [InlineKeyboardButton(f"📅 {label}", callback_data=f"data:{filme_id}:{data}")]
+        for data, label in datas_ordenadas
+    ]
+    teclado.append([InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")])
+
+    await query.edit_message_text(
+        "📅 Escolha a data:",
+        reply_markup=InlineKeyboardMarkup(teclado),
+    )
+
+
+# ── Data escolhida → tipos de sessão ─────────────────────────────────────────
+
+async def ver_tipos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    _, filme_id, data = query.data.split(":")
+    filme_id = int(filme_id)
+    cidade_slug = context.user_data.get("cidade", "uberlandia")
+
+    cinemas = supabase.table("cinemas").select("id").eq("cidade", cidade_slug).execute()
+    cinema_ids = [c["id"] for c in cinemas.data]
+
+    sessoes = (
+        supabase.table("sessoes")
+        .select("tipo_sessao, data_horario")
+        .eq("filme_id", filme_id)
+        .in_("cinema_id", cinema_ids)
+        .execute()
+    )
+
+    tipos_vistos = set()
+    for s in sessoes.data:
+        dt_utc = datetime.fromisoformat(s["data_horario"])
+        dt_brt = dt_utc.astimezone(timezone(timedelta(hours=-3)))
+        if dt_brt.strftime("%Y-%m-%d") == data and s.get("tipo_sessao"):
+            tipos_vistos.add(s["tipo_sessao"])
+
+    if not tipos_vistos:
+        await query.edit_message_text(
+            "Nenhuma sessão encontrada para essa data.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar", callback_data=f"sessoes:{filme_id}")]]),
+        )
+        return
+
+    teclado = [
+        [InlineKeyboardButton(tipo, callback_data=f"tipo:{filme_id}:{data}:{tipo}")]
+        for tipo in sorted(tipos_vistos)
+    ]
+    teclado.append([InlineKeyboardButton("⬅️ Voltar", callback_data=f"sessoes:{filme_id}")])
+
+    await query.edit_message_text(
+        "🎭 Escolha o tipo de sessão:",
+        reply_markup=InlineKeyboardMarkup(teclado),
+    )
+
+
+# ── Tipo escolhido → horários e preços ───────────────────────────────────────
+
+async def ver_horarios(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    partes = query.data.split(":")
+    filme_id = int(partes[1])
+    data = partes[2]
+    tipo = partes[3]
+    cidade_slug = context.user_data.get("cidade", "uberlandia")
 
     cinemas = (
         supabase.table("cinemas")
@@ -130,47 +233,55 @@ async def ver_sessoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     cinema_ids = {c["id"]: c["nome"] for c in cinemas.data}
 
-    # Horário atual de Brasília em UTC para comparar com o banco
-    agora_utc = datetime.now(timezone.utc)
-    limite_utc = agora_utc - timedelta(minutes=15)
-    limite_str = limite_utc.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-
     sessoes = (
         supabase.table("sessoes")
-        .select("cinema_id, data_horario, link_compra")
+        .select("cinema_id, data_horario, preco_sem_taxa, link_compra")
         .eq("filme_id", filme_id)
+        .eq("tipo_sessao", tipo)
         .in_("cinema_id", list(cinema_ids.keys()))
-        .gte("data_horario", limite_str)
         .order("data_horario")
         .execute()
     )
 
-    if not sessoes.data:
-        texto = "Não há sessões disponíveis para este filme no momento."
-    else:
-        texto = f"🎬 *{filme.data['titulo']}* — Sessões disponíveis:\n"
+    # Filtra pela data em Brasília
+    sessoes_do_dia = []
+    for s in sessoes.data:
+        dt_utc = datetime.fromisoformat(s["data_horario"])
+        dt_brt = dt_utc.astimezone(timezone(timedelta(hours=-3)))
+        if dt_brt.strftime("%Y-%m-%d") == data:
+            sessoes_do_dia.append((s, dt_brt))
 
-        por_cinema: dict = {}
-        for s in sessoes.data:
-            nome = cinema_ids[s["cinema_id"]]
-            por_cinema.setdefault(nome, []).append(s)
+    if not sessoes_do_dia:
+        await query.edit_message_text(
+            "Nenhuma sessão encontrada.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar", callback_data=f"data:{filme_id}:{data}")]]),
+        )
+        return
 
-        for nome_cinema, sessoes_cinema in por_cinema.items():
-            texto += f"\n🏟 *{nome_cinema}*\n"
-            for s in sessoes_cinema:
-                # Converte UTC para horário de Brasília para exibir
-                horario_utc = datetime.fromisoformat(s["data_horario"])
-                horario_brasilia = horario_utc.astimezone(timezone(timedelta(hours=-3)))
-                horario_str = horario_brasilia.strftime("%d/%m às %H:%M")
-                link = s["link_compra"]
-                texto += f"  • {horario_str} — [Comprar]({link})\n"
+    # Agrupa por cinema e monta os botões
+    por_cinema: dict = {}
+    for s, dt_brt in sessoes_do_dia:
+        nome = cinema_ids[s["cinema_id"]]
+        por_cinema.setdefault(nome, []).append((s, dt_brt))
 
-    teclado = [[InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")]]
+    teclado = []
+    for nome_cinema, sessoes_cinema in por_cinema.items():
+        teclado.append([InlineKeyboardButton(f"🏟 {nome_cinema}", callback_data="noop")])
+        for s, dt_brt in sessoes_cinema:
+            horario = dt_brt.strftime("%H:%M")
+            preco = f"R$ {s['preco_sem_taxa']:.2f}" if s.get("preco_sem_taxa") else "Preço indisponível"
+            teclado.append([
+                InlineKeyboardButton(
+                    f"🕐 {horario} — {preco}",
+                    url=s["link_compra"]
+                )
+            ])
+
+    teclado.append([InlineKeyboardButton("⬅️ Voltar", callback_data=f"data:{filme_id}:{data}")])
 
     await query.edit_message_text(
-        texto,
+        f"🎭 *{tipo}* — Escolha o horário:",
         parse_mode="Markdown",
-        disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(teclado),
     )
 
@@ -194,35 +305,19 @@ async def ver_trailer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if f.get("trailer_url_youtube"):
         texto = f"*{f['titulo']}* — Trailer"
-
         preview = LinkPreviewOptions(
             url=f["trailer_url_youtube"],
             prefer_large_media=True,
             show_above_text=True
         )
-
         teclado = [
-            [
-                InlineKeyboardButton(
-                    "▶️ Assistir no YouTube",
-                    url=f["trailer_url_youtube"]
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⬅️ Voltar",
-                    callback_data=f"filme:{filme_id}"
-                )
-            ]
+            [InlineKeyboardButton("▶️ Assistir no YouTube", url=f["trailer_url_youtube"])],
+            [InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")],
         ]
-
     else:
         texto = "Trailer não disponível para este filme."
         preview = LinkPreviewOptions(is_disabled=True)
-
-        teclado = [
-            [InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")]
-        ]
+        teclado = [[InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")]]
 
     await query.edit_message_text(
         texto,
@@ -255,8 +350,6 @@ async def ver_curiosidades(update: Update, context: ContextTypes.DEFAULT_TYPE):
         texto += f"🎬 *Diretor:* {f['diretor']}\n"
     if f.get("elenco"):
         texto += f"🎭 *Elenco:* {', '.join(f['elenco'][:5])}\n"
-
-    # Campos dos outros scrapers — aparecem automaticamente quando estiverem no banco
     if f.get("nota_imdb"):
         texto += f"⭐ *IMDb:* {f['nota_imdb']}\n"
     if f.get("popularidade_imdb"):
@@ -291,10 +384,13 @@ async def voltar_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+
 app.add_handler(CallbackQueryHandler(voltar_inicio, pattern="^voltar:inicio$"))
 app.add_handler(CallbackQueryHandler(escolher_cidade, pattern="^cidade:"))
 app.add_handler(CallbackQueryHandler(escolher_filme, pattern="^filme:"))
 app.add_handler(CallbackQueryHandler(ver_sessoes, pattern="^sessoes:"))
+app.add_handler(CallbackQueryHandler(ver_tipos, pattern="^data:"))
+app.add_handler(CallbackQueryHandler(ver_horarios, pattern="^tipo:"))
 app.add_handler(CallbackQueryHandler(ver_trailer, pattern="^trailer:"))
 app.add_handler(CallbackQueryHandler(ver_curiosidades, pattern="^curiosidades:"))
 
