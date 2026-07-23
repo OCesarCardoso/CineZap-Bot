@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 from database.supabase_client import supabase
@@ -190,15 +190,41 @@ async def ver_trailer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     f = filme.data
 
     if f.get("trailer_url_youtube"):
-        texto = f"▶️ *{f['titulo']}* — Trailer\n\n{f['trailer_url_youtube']}"
+        texto = f"*{f['titulo']}* — Trailer"
+
+        preview = LinkPreviewOptions(
+            url=f["trailer_url_youtube"],
+            prefer_large_media=True,
+            show_above_text=True
+        )
+
+        teclado = [
+            [
+                InlineKeyboardButton(
+                    "▶️ Assistir no YouTube",
+                    url=f["trailer_url_youtube"]
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "⬅️ Voltar",
+                    callback_data=f"filme:{filme_id}"
+                )
+            ]
+        ]
+
     else:
         texto = "Trailer não disponível para este filme."
+        preview = LinkPreviewOptions(is_disabled=True)
 
-    teclado = [[InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")]]
+        teclado = [
+            [InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")]
+        ]
 
     await query.edit_message_text(
         texto,
         parse_mode="Markdown",
+        link_preview_options=preview,
         reply_markup=InlineKeyboardMarkup(teclado),
     )
 
