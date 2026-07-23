@@ -10,8 +10,9 @@ from scraper.ingresso import listar_filmes_em_cartaz
 from scraper.ingresso import listar_sessoes_do_filme
 
 from scraper.youtube import buscar_trailer_youtube
+from scraper.mojo import buscar_bilheteria_mojo
 
-from database.supabase_client import salvar_dados_ingresso, salvar_dados_youtube
+from database.supabase_client import salvar_dados_ingresso, salvar_dados_youtube, salvar_bilheteria_mojo
 
 
 cidade = "uberlandia"
@@ -65,7 +66,13 @@ for filme in filmes:
     if youtube:
         salvar_dados_youtube(titulo, youtube["trailer_url"], youtube["imagem_url_youtube"])
 
-
-    print("OK\n")
+    # BOX OFFICE MOJO -------------------------------
+    print(f"  Buscando bilheteria no Box Office Mojo...")
+    bilheteria = buscar_bilheteria_mojo(titulo)
+    
+    if bilheteria:
+        salvar_bilheteria_mojo(titulo, bilheteria)
+    else:
+        print(f"  ⚠️ Bilheteria não encontrada para '{titulo}'")
 
 print("Scrapings finalizados!")

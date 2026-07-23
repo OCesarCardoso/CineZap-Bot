@@ -84,3 +84,20 @@ def salvar_dados_youtube(titulo: str, trailer_url: str, imagem_url_youtube: str)
 
     except Exception as e:
         print(f"Erro ao atualizar YouTube para '{titulo}': {e}")
+
+def salvar_bilheteria_mojo(titulo: str, bilheteria: str):
+    """
+    Atualiza a bilheteria do Box Office Mojo de um filme já salvo no banco.
+    """
+    try:
+        if bilheteria:
+            supabase.table("filmes").update({
+                "bilheteria_mojo": bilheteria,
+            }).eq("titulo", titulo).execute()
+            
+            print(f"💰 Bilheteria atualizada para '{titulo}': {bilheteria}")
+        else:
+            print(f"⚠️ Bilheteria não encontrada para '{titulo}'")
+            
+    except Exception as e:
+        print(f"Erro ao atualizar bilheteria para '{titulo}': {e}")
