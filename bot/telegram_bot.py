@@ -239,7 +239,7 @@ async def ver_curiosidades(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     filme = (
         supabase.table("filmes")
-        .select("titulo, diretor, elenco, nota_imdb, nota_rotten, bilheteria_mojo")
+        .select("titulo, diretor, elenco, nota_imdb, popularidade_imdb, bilheteria_mojo")
         .eq("id", filme_id)
         .single()
         .execute()
@@ -256,8 +256,8 @@ async def ver_curiosidades(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Campos dos outros scrapers — aparecem automaticamente quando estiverem no banco
     if f.get("nota_imdb"):
         texto += f"⭐ *IMDb:* {f['nota_imdb']}\n"
-    if f.get("nota_rotten"):
-        texto += f"🍅 *Rotten Tomatoes:* {f['nota_rotten']}\n"
+    if f.get("popularidade_imdb"):
+        texto += f"💡 *Popularidade IMDb:* {f['popularidade_imdb']}\n"
     if f.get("bilheteria_mojo"):
         texto += f"💰 *Bilheteria:* {f['bilheteria_mojo']}\n"
 

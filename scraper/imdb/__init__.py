@@ -29,6 +29,7 @@ def buscar_dados_imdb(titulo_filme: str) -> dict | None:
             "imdb_id": filme.imdb_id,
             "nota_imdb": filme.imdb_rating,
             "popularidade_imdb": filme.popularity,
+            "duracao": filme.duration,
         }
 
     except Exception as e:
