@@ -12,5 +12,7 @@ __pycache__/
 # Arquivos do VS Code
 .vscode/
 
+.idea/
+
 # Logs
 *.log
