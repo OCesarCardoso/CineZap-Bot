@@ -130,10 +130,10 @@ async def ver_sessoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     cinema_ids = {c["id"]: c["nome"] for c in cinemas.data}
 
-    # Filtra sessões que ainda não passaram (com tolerância de 15 minutos)
-    agora = datetime.now(timezone(timedelta(hours=-3)))
-    limite = agora - timedelta(minutes=15)
-    limite_str = limite.strftime("%Y-%m-%dT%H:%M:%S")
+    # Horário atual de Brasília em UTC para comparar com o banco
+    agora_utc = datetime.now(timezone.utc)
+    limite_utc = agora_utc - timedelta(minutes=15)
+    limite_str = limite_utc.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
     sessoes = (
         supabase.table("sessoes")
@@ -158,9 +158,12 @@ async def ver_sessoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for nome_cinema, sessoes_cinema in por_cinema.items():
             texto += f"\n🏟 *{nome_cinema}*\n"
             for s in sessoes_cinema:
-                horario = s["data_horario"][:16].replace("T", " ")
+                # Converte UTC para horário de Brasília para exibir
+                horario_utc = datetime.fromisoformat(s["data_horario"])
+                horario_brasilia = horario_utc.astimezone(timezone(timedelta(hours=-3)))
+                horario_str = horario_brasilia.strftime("%d/%m às %H:%M")
                 link = s["link_compra"]
-                texto += f"  • {horario} — [Comprar]({link})\n"
+                texto += f"  • {horario_str} — [Comprar]({link})\n"
 
     teclado = [[InlineKeyboardButton("⬅️ Voltar", callback_data=f"filme:{filme_id}")]]
 

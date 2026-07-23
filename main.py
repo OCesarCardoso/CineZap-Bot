@@ -1,24 +1,19 @@
-# Objetivo do main.py:
-
-# 1. Escolher a cidade.
-# 2. Buscar os filmes em cartaz.
-# 3. Para cada filme, buscar os detalhes e as sessões.
-# 4. Salvar tudo no banco.
-# 5. Exibir um resumo no terminal.
-
-from scraper.ingresso import listar_filmes_em_cartaz
-from scraper.ingresso import listar_sessoes_do_filme
-
+from scraper.ingresso import listar_filmes_em_cartaz, listar_sessoes_do_filme
 from scraper.youtube import buscar_trailer_youtube
 from scraper.mojo import buscar_bilheteria_mojo
 from scraper.imdb import buscar_dados_imdb
-
-from database.supabase_client import salvar_dados_ingresso, salvar_dados_youtube, salvar_bilheteria_mojo
-
+from database.supabase_client import (
+    salvar_dados_ingresso,
+    salvar_dados_youtube,
+    salvar_bilheteria_mojo,
+    limpar_sessoes_da_cidade,
+)
 
 cidade = "uberlandia"
 
 print(f"Buscando filmes em cartaz em {cidade}...\n")
+
+limpar_sessoes_da_cidade(cidade)
 
 filmes = listar_filmes_em_cartaz(cidade)
 
@@ -30,18 +25,17 @@ for filme in filmes:
     detalhes = listar_sessoes_do_filme(cidade, filme["url_key"])
     titulo = detalhes["filme"].get("titulo") or filme["titulo"]
 
-    # IMDB -------------------------------
+    # IMDb
     print(f"  Buscando dados no IMDb...")
     imdb = buscar_dados_imdb(titulo)
 
-    # INGRESSO.COM -------------------------------
+    # Ingresso.com
     salvar_dados_ingresso(
         filme_dados={
             "titulo": titulo,
             "url": f"https://www.ingresso.com/filme/{filme['url_key']}",
             "imagem_url": detalhes["filme"].get("imagem_url"),
             "duracao": imdb.get("duracao") if imdb else detalhes["filme"].get("duracao"),
-            # "duracao": detalhes["filme"].get("duracao"),
             "classificacao": detalhes["filme"].get("classificacao"),
             "diretor": detalhes["filme"].get("diretor"),
             "generos": detalhes["filme"].get("generos", []),
@@ -52,25 +46,30 @@ for filme in filmes:
         },
         sinopse=detalhes["filme"].get("sinopse"),
         sessoes_lista=[
-            {"cinema": s["cinema_nome"], "horario": s["horario"], "link_compra": s["checkout_url"]}
+            {
+                "cinema": s["cinema_nome"],
+                "horario": s["horario"],
+                "link_compra": s["checkout_url"]
+            }
             for s in detalhes["sessoes"]
             if s["cinema_nome"] and s["horario"]
         ],
         cidade_slug=cidade
     )
-    # YOUTUBE -------------------------------
-    youtube = buscar_trailer_youtube(titulo)
 
+    # YouTube
+    youtube = buscar_trailer_youtube(titulo)
     if youtube:
         salvar_dados_youtube(titulo, youtube["trailer_url"], youtube["imagem_url_youtube"])
 
-    # BOX OFFICE MOJO -------------------------------
+    # Box Office Mojo
     print(f"  Buscando bilheteria no Box Office Mojo...")
     bilheteria = buscar_bilheteria_mojo(titulo)
-    
     if bilheteria:
         salvar_bilheteria_mojo(titulo, bilheteria)
     else:
-        print(f"  ⚠️ Bilheteria não encontrada para '{titulo}'")
+        print(f"  Bilheteria não encontrada para '{titulo}'")
 
-print("Scrapings finalizados!")
+    print()
+
+print("Scraping finalizado!")
